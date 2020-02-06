@@ -10,11 +10,22 @@ public class Manager : MonoBehaviour
 {
     #region DEF
     static string URL = "https://www.thesaigontimes.vn";
+    static string TAG_TITLE = "<title>|</title>";
+    static string TAG_DATE = "\"Date\"";
+    static string TAG_AUTHOR = "\"ReferenceSourceTG\"";
 
     [Serializable]
     public class Poster
     {
-        public string Url, Author, DatePublish;
+        public string Url, Title, Author, DatePublish;
+
+        public Poster(string Url, string Title, string Author, string DatePublish)
+        {
+            this.Url = Url;
+            this.Title = Title;
+            this.Author = Author;
+            this.DatePublish = DatePublish;
+        }
     }
     #endregion
 
@@ -26,40 +37,42 @@ public class Manager : MonoBehaviour
 
     #region CACHE
     public List<Poster> CachePoster = new List<Poster>();
+    Queue<string> CacheLinks = new Queue<string>();
+    List<string> CacheRequestedLinks = new List<string>();
+    bool m_IsLoadedOriginPage;
     #endregion
 
     // Start is called before the first frame update
     void Start()
     {
+        m_IsLoadedOriginPage = false;
         UIElement.gameObject.SetActive(false);
         TextURL.text = string.Format("URL: {0}", URL);
 
-        StartCoroutine(ParseData(URL));
+        CacheLinks.Enqueue(URL);
+        StartCoroutine(SearchPosterFromURL());
     }
 
     // Update is called once per frame
     void Update()
     {
-        if(Input.GetKeyUp(KeyCode.Escape))
+        if (Input.GetKeyUp(KeyCode.Escape))
         {
             Application.Quit();
         }
     }
 
-    IEnumerator ParseData(string originUrl)
+    IEnumerator SearchPosterFromURL()
     {
-        Queue<string> links = new Queue<string>();
-        links.Enqueue(originUrl);
-
-        while (links.Count > 0)
+        while (CacheLinks.Count > 0)
         {
             // Get a link
-            string url = links.Dequeue();
+            string url = CacheLinks.Dequeue();
 
             // Get content from link
             UnityWebRequest www = UnityWebRequest.Get(url);
             yield return www.SendWebRequest();
-
+            Debug.LogWarning("Request url count >>>");
             if (www.isNetworkError || www.isHttpError)
             {
                 Debug.Log(www.error);
@@ -67,24 +80,11 @@ public class Manager : MonoBehaviour
             else
             {
                 string content = www.downloadHandler.text;
-                Debug.LogWarning("Data: " + content);
+                //Debug.LogWarning("Data: " + content);
 
-                // Split node
+                // Parse content
                 if (!string.IsNullOrEmpty(content))
-                {
-                    var posters = SplitNotes(content);
-
-                    if(posters != null && posters.Count > 0)
-                    {
-                        for (int i = 0; i < posters.Count; i++)
-                        {
-                            CachePoster.Add(posters[i]);
-                        }
-
-                    }
-                }
-
-
+                    ParseContent(url, content);
 
             }
 
@@ -95,30 +95,74 @@ public class Manager : MonoBehaviour
         Debug.Log("Parse Data Done !!!");
     }
 
-    List<Poster> SplitNotes(string data)
+    void ParseContent(string url, string data)
     {
-        List<Poster> result = new List<Poster>();
+        var rawSplit = Regex.Split(data, "href=\"");
+        List<string> hrefSplit = new List<string>();
 
-        //int start = data.IndexOf("<body>");
-        //int end = data.IndexOf("<\body>");
-        //data = data.Substring(start, (end - start));
+        if (m_IsLoadedOriginPage)
+        {
+            // Get detail page
+            Poster poster = GetDetailPage(url, data);
 
-        var pattern = "(<body|</body>)";
-        var rawSplit = Regex.Split(data, pattern);
-        string rawbody = rawSplit.GetValue(rawSplit.Length / 2).ToString();
-        string body = rawbody.Substring(rawbody.IndexOf('>') + 1);
-        body = body.Replace("\n", "").Replace("\n ", "").Replace("\r", "").Replace("\r ", "");
+            if(poster != null)
+                CachePoster.Add(poster);
+        }
 
-        Debug.Log("Body: " + body);
+        foreach (string item in rawSplit)
+        {
+            string alink = item.Substring(0, item.IndexOf("\""));
+            if (alink.IndexOf(".html") >= 0 && alink.IndexOf("https") < 0)
+            {
+                // Compare url requested
+                if (!CacheRequestedLinks.Contains(alink))
+                {
+                    // Save the path to make sure not to call only 2 times for 1 link
+                    CacheRequestedLinks.Add(alink);
 
-        if (result.Count > 0)
-            return result;
+                    // Add to the request queues
+                    CacheLinks.Enqueue(URL + alink);
+                }
+
+            }
+        }
+        rawSplit = null;
+
+        m_IsLoadedOriginPage = true;
+
+
+    }
+
+    Poster GetDetailPage(string url, string data)
+    {
+        var rawDetail = Regex.Split(data, TAG_TITLE);
+        string title = rawDetail.Length > 1 ? rawDetail.GetValue(1).ToString().Replace("/r", "").Replace("/n", "").Trim() : "";
+
+        string date = "";
+        rawDetail = Regex.Split(data, TAG_DATE);
+        if (rawDetail.Length > 1)
+        {
+            date = rawDetail.GetValue(1).ToString();
+            date = date.Substring(1, date.IndexOf("<") - 1);
+            date = date.Replace("&nbsp;", " ");
+        }
+
+        string author = "";
+        rawDetail = Regex.Split(data, TAG_AUTHOR);
+        if (rawDetail.Length > 1)
+        {
+            author = rawDetail.GetValue(1).ToString();
+            author = author.Substring(1, author.IndexOf("<") - 1);
+        }
+
+        if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(date) && !string.IsNullOrEmpty(author))
+            return new Poster(url, title, author, date);
         return null;
     }
 
     void RefeshUI()
     {
-        
+
     }
 
 }
