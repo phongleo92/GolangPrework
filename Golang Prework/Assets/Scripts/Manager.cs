@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -10,6 +11,7 @@ public class Manager : MonoBehaviour
 {
     #region DEF
     static string URL = "https://www.thesaigontimes.vn";
+    static string FILE_NAME = "GolangPreworkData.csv";
     static string TAG_TITLE = "<title>|</title>";
     static string TAG_DATE = "\"Date\"";
     static string TAG_AUTHOR = "\"ReferenceSourceTG\"";
@@ -27,12 +29,18 @@ public class Manager : MonoBehaviour
             this.DatePublish = DatePublish;
         }
     }
+    [Serializable]
+    public enum EventButton
+    {
+        Search,
+        DoneSearch
+    }
     #endregion
 
     #region REF
-    [SerializeField] Text TextURL;
+    [SerializeField] Text TextTitle, TextLog, TextButton;
     [SerializeField] Transform UIContent;
-    [SerializeField] Transform UIElement;
+    [SerializeField] Button ButtonAction;
     #endregion
 
     #region CACHE
@@ -40,17 +48,26 @@ public class Manager : MonoBehaviour
     Queue<string> CacheLinks = new Queue<string>();
     List<string> CacheRequestedLinks = new List<string>();
     bool m_IsLoadedOriginPage;
+    bool m_BreakQueue;
+    EventButton m_EventButton;
     #endregion
 
     // Start is called before the first frame update
     void Start()
     {
-        m_IsLoadedOriginPage = false;
-        UIElement.gameObject.SetActive(false);
-        TextURL.text = string.Format("URL: {0}", URL);
+        TextTitle.text = string.Format("GOLANG PREWORK - {0}", URL);
+        m_EventButton = EventButton.Search;
+    }
 
+    void DefaultValue()
+    {
+        CachePoster.Clear();
+        CacheLinks.Clear();
+        CacheRequestedLinks.Clear();
+        m_IsLoadedOriginPage = false;
+        m_BreakQueue = false;
+        TextLog.text = string.Format("Seaching...");
         CacheLinks.Enqueue(URL);
-        StartCoroutine(SearchPosterFromURL());
     }
 
     // Update is called once per frame
@@ -64,7 +81,7 @@ public class Manager : MonoBehaviour
 
     IEnumerator SearchPosterFromURL()
     {
-        while (CacheLinks.Count > 0)
+        while (CacheLinks.Count > 0 && !m_BreakQueue)
         {
             // Get a link
             string url = CacheLinks.Dequeue();
@@ -86,13 +103,18 @@ public class Manager : MonoBehaviour
                 if (!string.IsNullOrEmpty(content))
                     ParseContent(url, content);
 
-            }
+                TextLog.text = string.Format("Found: {0} item", CachePoster.Count);
 
+            }
 
         }
 
+        string pathData = ExportCSV();
 
-        Debug.Log("Parse Data Done !!!");
+        TextLog.text = string.Format("Process complete !\n File Path: {0}", pathData);
+        Debug.Log(TextLog.text);
+
+        ButtonAction.enabled = true;
     }
 
     void ParseContent(string url, string data)
@@ -107,6 +129,10 @@ public class Manager : MonoBehaviour
 
             if(poster != null)
                 CachePoster.Add(poster);
+        }
+        else
+        {
+            ButtonAction.enabled = true;
         }
 
         foreach (string item in rawSplit)
@@ -129,8 +155,6 @@ public class Manager : MonoBehaviour
         rawSplit = null;
 
         m_IsLoadedOriginPage = true;
-
-
     }
 
     Poster GetDetailPage(string url, string data)
@@ -145,6 +169,8 @@ public class Manager : MonoBehaviour
             date = rawDetail.GetValue(1).ToString();
             date = date.Substring(1, date.IndexOf("<") - 1);
             date = date.Replace("&nbsp;", " ");
+            date = date.Replace(",", " -");
+            date = date.Replace("  ", " ");
         }
 
         string author = "";
@@ -160,9 +186,43 @@ public class Manager : MonoBehaviour
         return null;
     }
 
-    void RefeshUI()
+    string ExportCSV()
     {
-
+        string path = string.Format("{0}/{1}", Application.persistentDataPath, FILE_NAME);
+        string exportData = "Golang Prework Data";
+        foreach (var poster in CachePoster)
+        {
+            exportData += string.Format("\n{0}, {1}, {2}, {3}", poster.Url, poster.Title, poster.Author, poster.DatePublish);
+        }
+        StreamWriter writer = new StreamWriter(path, false);
+        writer.Write(exportData);
+        writer.Close();
+        return path;
     }
+
+    #region Event for buttons
+    public void ButtonEvent()
+    {
+        switch (m_EventButton)
+        {
+            case EventButton.Search:
+                {
+                    DefaultValue();
+                    StartCoroutine(SearchPosterFromURL());
+                    m_EventButton = EventButton.DoneSearch;
+                    TextButton.text = "Break Queue";
+                }
+                break;
+            case EventButton.DoneSearch:
+                {
+                    m_BreakQueue = true;
+                    m_EventButton = EventButton.Search;
+                    TextButton.text = "Start Search";
+                }
+                break;
+        }
+        ButtonAction.enabled = false;
+    }
+    #endregion
 
 }
